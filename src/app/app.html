@@ -242,6 +242,14 @@
                 (click)="exportResults()">
                 📥 Exportar Resultados
               </button>
+              
+              <button 
+                type="button"
+                class="px-6 py-2 bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm text-white focus:outline-none dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800"
+                (click)="exportCleanCatalog()"
+                title="Descarga un archivo Excel del catálogo sin las filas que contienen valores no encontrados">
+                🧹 Descargar Catálogo Limpio
+              </button>
             }
             
             @if (selectedCatalogoColumn() || selectedLineasColumn() || comparisonResults().length > 0) {
@@ -299,3 +307,8 @@
     }
   </section>
 </main>
+
+<!-- Contenedor de Toasts -->
+<div id="toast-container" class="fixed top-5 right-5 z-50 space-y-4 max-w-xs">
+  <!-- Los toasts se insertarán aquí dinámicamente -->
+</div>
