@@ -70,7 +70,7 @@ export class App {
   protected readonly selectedLineasColumn = signal<string>('');
   
   /** @description Signal que contiene los valores del catálogo que no se encontraron en los pedidos */
-  protected readonly comparisonResults = signal<string[]>([]);
+  protected readonly comparisonResults = signal<{campo: string, nombre: string, displayText: string}[]>([]);
   
   /** @description Signal que indica si se está ejecutando una comparación de columnas */
   protected readonly isComparing = signal<boolean>(false);
@@ -486,8 +486,9 @@ export class App {
    * Compara las columnas seleccionadas entre catálogo y líneas de pedido.
    * 
    * @description Identifica valores presentes en la columna del catálogo que no se
-   * encuentran en la columna de líneas de pedido. Realiza normalización de datos
-   * para comparaciones precisas (ignora mayúsculas/minúsculas y espacios).
+   * encuentran en la columna de líneas de pedido. Captura tanto el campo seleccionado
+   * como el campo "nombre" para mostrar información más completa. Realiza normalización
+   * de datos para comparaciones precisas (ignora mayúsculas/minúsculas y espacios).
    * 
    * @returns {void}
    * 
@@ -495,10 +496,17 @@ export class App {
    * - Verifica que se hayan seleccionado ambas columnas
    * - Confirma que ambos archivos tengan datos cargados
    * 
+   * @features
+   * - Busca automáticamente el campo "nombre" en diferentes variaciones
+   * - Genera texto de visualización en formato "{campo} - {nombre}"
+   * - Elimina duplicados basándose en el campo principal
+   * - Ordena alfabéticamente los resultados
+   * 
    * @example
    * ```typescript
    * // Después de cargar archivos y seleccionar columnas
    * this.compareColumns(); // Encuentra valores del catálogo no presentes en pedidos
+   * // Resultado: [{campo: "A1234", nombre: "Paracetamol", displayText: "A1234 - Paracetamol"}]
    * ```
    */
   protected compareColumns(): void {
@@ -535,27 +543,38 @@ export class App {
       );
 
       // Encontrar valores del catálogo que NO están en líneas de pedido
-      const valoresFaltantes: string[] = [];
+      const valoresFaltantes: {campo: string, nombre: string, displayText: string}[] = [];
+      const valoresYaProcesados = new Set<string>();
       
       this.catalogoData().forEach(row => {
         const valor = row[catalogoCol];
         if (valor !== null && valor !== undefined && valor !== '') {
           const valorNormalizado = String(valor).trim().toLowerCase();
-          if (!lineasValues.has(valorNormalizado)) {
+          if (!lineasValues.has(valorNormalizado) && !valoresYaProcesados.has(valorNormalizado)) {
             const valorOriginal = String(valor).trim();
-            if (!valoresFaltantes.includes(valorOriginal)) {
-              valoresFaltantes.push(valorOriginal);
-            }
+            const nombre = row['nombre'] || row['Nombre'] || row['NOMBRE'] || row['descripcion'] || row['Descripcion'] || row['DESCRIPCION'] || 'Sin nombre';
+            const displayText = `${valorOriginal} - ${nombre}`;
+            
+            valoresFaltantes.push({
+              campo: valorOriginal,
+              nombre: String(nombre).trim(),
+              displayText: displayText
+            });
+            
+            valoresYaProcesados.add(valorNormalizado);
           }
         }
       });
 
-      this.comparisonResults.set(valoresFaltantes.sort());
+      // Ordenar por campo
+      const valoresOrdenados = valoresFaltantes.sort((a, b) => a.campo.localeCompare(b.campo));
+      this.comparisonResults.set(valoresOrdenados);
 
       console.log(`Comparación completada:`);
       console.log(`- Valores únicos en catálogo (${catalogoCol}): ${catalogoValues.size}`);
       console.log(`- Valores únicos en pedidos (${lineasCol}): ${lineasValues.size}`);
-      console.log(`- Valores del catálogo no encontrados en pedidos: ${valoresFaltantes.length}`);
+      console.log(`- Valores del catálogo no encontrados en pedidos: ${valoresOrdenados.length}`);
+      console.log('- Valores faltantes:', valoresOrdenados.map(item => item.displayText));
 
     } catch (error) {
       console.error('Error al comparar columnas:', error);
@@ -588,8 +607,8 @@ export class App {
     }
 
     const csvContent = [
-      'Valores del catálogo no encontrados en pedidos',
-      ...this.comparisonResults()
+      'Campo,Nombre,Descripción Completa',
+      ...this.comparisonResults().map(item => `"${item.campo}","${item.nombre}","${item.displayText}"`)
     ].join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -643,7 +662,7 @@ export class App {
     try {
       // Obtener los valores que deben eliminarse (normalizar para comparación)
       const valoresAEliminar = new Set(
-        this.comparisonResults().map(valor => String(valor).trim().toLowerCase())
+        this.comparisonResults().map(item => item.campo.trim().toLowerCase())
       );
 
       // Filtrar los datos del catálogo eliminando las filas que contienen valores no encontrados
