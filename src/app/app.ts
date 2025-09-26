@@ -75,6 +75,9 @@ export class App {
   /** @description Signal que indica si se está ejecutando una comparación de columnas */
   protected readonly isComparing = signal<boolean>(false);
 
+  /** @description Signal que almacena las columnas del catálogo seleccionadas para incluir en el CSV de exportación */
+  protected readonly selectedExportColumns = signal<string[]>([]);
+
   /**
    * Hook de inicialización del componente Angular.
    * 
@@ -277,7 +280,25 @@ export class App {
         if (type === 'catalogo') {
           this.catalogoData.set(processedData);
           this.catalogoColumns.set(columns);
+          
+          // Auto-seleccionar columnas comunes para exportación
+          const defaultExportColumns: string[] = [];
+          
+          // Buscar y añadir automáticamente columnas comunes
+          const commonColumnPatterns = [
+            /^clasificaci[oó]n$/i,
+            
+          ];
+          
+          columns.forEach(col => {
+            if (commonColumnPatterns.some(pattern => pattern.test(col))) {
+              defaultExportColumns.push(col);
+            }
+          });
+          
+          this.selectedExportColumns.set(defaultExportColumns);
           console.log('Columnas del catálogo:', columns);
+          console.log('Columnas auto-seleccionadas para exportación:', defaultExportColumns);
           console.log('Datos del catálogo:', processedData.slice(0, 5)); // Mostrar solo las primeras 5 filas
         } else {
           this.lineasData.set(processedData);
@@ -585,19 +606,72 @@ export class App {
   }
 
   /**
-   * Exporta los resultados de la comparación a un archivo CSV.
+   * Alterna la selección de una columna del catálogo para incluir en el CSV de exportación.
    * 
-   * @description Genera y descarga un archivo CSV que contiene la lista de valores
-   * del catálogo que no fueron encontrados en las líneas de pedido.
+   * @description Añade o elimina una columna de la lista de columnas seleccionadas
+   * para exportación según su estado actual.
    * 
+   * @param {string} columnName - Nombre de la columna a alternar
    * @returns {void}
-   * 
-   * @validation Verifica que existan resultados de comparación antes de exportar
    * 
    * @example
    * ```typescript
-   * // Después de ejecutar compareColumns() con resultados
-   * this.exportResults(); // Descarga 'valores_faltantes.csv'
+   * this.toggleExportColumn('Clasificación'); // Añade o quita 'Clasificación'
+   * ```
+   */
+  protected toggleExportColumn(columnName: string): void {
+    const currentSelected = this.selectedExportColumns();
+    const isSelected = currentSelected.includes(columnName);
+    
+    if (isSelected) {
+      this.selectedExportColumns.set(currentSelected.filter(col => col !== columnName));
+    } else {
+      this.selectedExportColumns.set([...currentSelected, columnName]);
+    }
+  }
+
+  /**
+   * Verifica si una columna del catálogo está seleccionada para exportación.
+   * 
+   * @description Método auxiliar para determinar el estado de selección de una columna
+   * en la interfaz de usuario.
+   * 
+   * @param {string} columnName - Nombre de la columna a verificar
+   * @returns {boolean} true si la columna está seleccionada, false en caso contrario
+   * 
+   * @example
+   * ```typescript
+   * const isSelected = this.isExportColumnSelected('Precio'); // true/false
+   * ```
+   */
+  protected isExportColumnSelected(columnName: string): boolean {
+    return this.selectedExportColumns().includes(columnName);
+  }
+
+  /**
+   * Exporta los resultados de la comparación a un archivo Excel con columnas personalizadas.
+   * 
+   * @description Genera y descarga un archivo Excel que contiene la lista de valores
+   * del catálogo que no fueron encontrados en las líneas de pedido, incluyendo
+   * las columnas adicionales seleccionadas por el usuario.
+   * 
+   * @returns {void}
+   * 
+   * @validation 
+   * - Verifica que existan resultados de comparación antes de exportar
+   * - Confirma que hay datos del catálogo disponibles
+   * 
+   * @features
+   * - Incluye columnas seleccionadas del catálogo por separado
+   * - Mantiene el campo y nombre como columnas individuales
+   * - Busca datos completos del catálogo para cada resultado
+   * - Maneja valores faltantes con texto predeterminado
+   * - Genera archivo nativo de Excel (.xlsx) con formato profesional
+   * 
+   * @example
+   * ```typescript
+   * // Después de ejecutar compareColumns() y seleccionar columnas
+   * this.exportResults(); // Descarga 'valores_faltantes_detallado.xlsx'
    * ```
    */
   protected exportResults(): void {
@@ -606,22 +680,70 @@ export class App {
       return;
     }
 
-    const csvContent = [
-      'Campo,Nombre,Descripción Completa',
-      ...this.comparisonResults().map(item => `"${item.campo}","${item.nombre}","${item.displayText}"`)
-    ].join('\n');
+    if (this.catalogoData().length === 0) {
+      this.showToast('error', 'Sin datos del catálogo', 'No hay datos del catálogo disponibles para la exportación detallada.');
+      return;
+    }
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'valores_faltantes.csv');
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      // Construir encabezados del CSV: campo base + nombre + columnas seleccionadas
+      const baseHeaders = ['Genérico', 'Nombre'];
+      const selectedColumns = this.selectedExportColumns();
+      const headers = [...baseHeaders, ...selectedColumns];
+
+      // Crear un mapa de búsqueda rápida del catálogo por el campo seleccionado
+      const catalogoMap = new Map<string, any>();
+      const selectedCatalogoCol = this.selectedCatalogoColumn();
+      
+      this.catalogoData().forEach(row => {
+        const key = String(row[selectedCatalogoCol] || '').trim().toLowerCase();
+        if (key) {
+          catalogoMap.set(key, row);
+        }
+      });
+
+      // Construir filas del CSV con datos completos
+      // Preparar datos para Excel
+      const excelData: any[] = [];
+      
+      this.comparisonResults().forEach(result => {
+        const key = result.campo.trim().toLowerCase();
+        const catalogoRow = catalogoMap.get(key);
+        
+        const row: any = {
+          [headers[0]]: result.campo,
+          [headers[1]]: result.nombre
+        };
+
+        // Añadir valores de las columnas seleccionadas
+        selectedColumns.forEach(col => {
+          const value = catalogoRow ? (catalogoRow[col] || 'N/A') : 'N/A';
+          row[col] = value;
+        });
+
+        excelData.push(row);
+      });
+
+      // Crear workbook y worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      
+      // Agregar la hoja al workbook
+      XLSX.utils.book_append_sheet(wb, ws, 'Valores Faltantes');
+      
+      // Generar y descargar el archivo Excel
+      XLSX.writeFile(wb, 'valores_faltantes_detallado.xlsx');
+
+      const columnsInfo = selectedColumns.length > 0 ? 
+        `Columnas incluidas: ${selectedColumns.join(', ')}` : 
+        'Solo genérico y nombre incluidos';
+      
+      this.showToast('success', 'Excel generado', `Archivo exportado con ${this.comparisonResults().length} registros. ${columnsInfo}`, 6000);
+
+    } catch (error) {
+      console.error('Error al exportar resultados:', error);
+      this.showToast('error', 'Error de exportación', 'Error al generar el archivo CSV. Verifica que los datos sean válidos.');
+    }
   }
 
   /**
@@ -712,6 +834,7 @@ export class App {
    * 
    * @description Reinicia las columnas seleccionadas y los resultados de comparación,
    * permitiendo al usuario realizar una nueva comparación desde cero.
+   * No limpia las columnas de exportación para mantener las preferencias del usuario.
    * 
    * @returns {void}
    * 
@@ -724,6 +847,7 @@ export class App {
     this.selectedCatalogoColumn.set('');
     this.selectedLineasColumn.set('');
     this.comparisonResults.set([]);
+    // Nota: No limpiamos selectedExportColumns para mantener las preferencias del usuario
   }
 
   /**
@@ -757,5 +881,67 @@ export class App {
     if (lineasInput) {
       lineasInput.value = '';
     }
+  }
+
+  /**
+   * Limpia completamente todos los datos y resetea la aplicación al estado inicial.
+   * 
+   * @description Elimina todos los archivos cargados, datos procesados, selecciones
+   * y configuraciones, regresando la aplicación a su estado inicial limpio.
+   * 
+   * @returns {void}
+   * 
+   * @sideEffects
+   * - Limpia ambos inputs de archivos HTML
+   * - Resetea todas las configuraciones y selecciones
+   * - Limpia las columnas de exportación seleccionadas
+   * 
+   * @example
+   * ```typescript
+   * this.clearAllData(); // Reset completo de la aplicación
+   * ```
+   */
+  protected clearAllData(): void {
+    // Limpiar archivos y datos
+    this.catalogoFile.set(null);
+    this.catalogoData.set([]);
+    this.catalogoColumns.set([]);
+    this.clearLineasFiles();
+    
+    // Limpiar configuraciones de exportación
+    this.selectedExportColumns.set([]);
+    
+    // Limpiar inputs HTML
+    const catalogoInput = document.getElementById('file_input_catalogo') as HTMLInputElement;
+    if (catalogoInput) {
+      catalogoInput.value = '';
+    }
+  }
+
+  /**
+   * Obtiene los datos completos del catálogo para un campo específico.
+   * 
+   * @description Busca en los datos del catálogo el registro que coincida con el campo
+   * especificado y devuelve todos sus datos para mostrar en la vista previa.
+   * 
+   * @param {string} campo - Valor del campo a buscar en la columna seleccionada del catálogo
+   * @returns {any | null} Objeto con todos los datos de la fila del catálogo o null si no se encuentra
+   * 
+   * @example
+   * ```typescript
+   * const datos = this.getCatalogoDataForField('A1234');
+   * // Retorna: { Codigo: 'A1234', Nombre: 'Paracetamol', Clasificacion: 'Medicamento', ... }
+   * ```
+   */
+  protected getCatalogoDataForField(campo: string): any | null {
+    if (!this.selectedCatalogoColumn() || this.catalogoData().length === 0) {
+      return null;
+    }
+
+    const normalizedField = campo.trim().toLowerCase();
+    return this.catalogoData().find(row => {
+      const rowValue = String(row[this.selectedCatalogoColumn()] || '').trim().toLowerCase();
+      return rowValue === normalizedField;
+    }) || null;
   }
 }

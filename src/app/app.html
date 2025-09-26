@@ -50,7 +50,16 @@
     <!-- Estado de archivos seleccionados -->
     @if (catalogoFile() || lineasFiles().length > 0) {
       <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg dark:bg-blue-900/20 dark:border-blue-800">
-        <h6 class="text-lg font-semibold text-blue-900 dark:text-blue-100 mb-2">Archivos seleccionados:</h6>
+        <div class="flex items-center justify-between mb-2">
+          <h6 class="text-lg font-semibold text-blue-900 dark:text-blue-100">Archivos seleccionados:</h6>
+          <button 
+            type="button"
+            class="px-3 py-1 bg-gray-500 hover:bg-gray-600 focus:ring-4 focus:ring-gray-300 font-medium rounded-lg text-xs text-white focus:outline-none dark:bg-gray-600 dark:hover:bg-gray-700 dark:focus:ring-gray-800"
+            (click)="clearAllData()"
+            title="Limpiar todos los archivos y datos">
+            🧹 Limpiar todo
+          </button>
+        </div>
         
         @if (catalogoFile()) {
           <p class="text-sm text-blue-800 dark:text-blue-200">
@@ -221,6 +230,43 @@
             </div>
           </div>
 
+          <!-- Sección de configuración de columnas para exportación -->
+          @if (catalogoColumns().length > 0) {
+            <div class="mb-6 p-4 bg-white border border-indigo-200 rounded-lg dark:bg-gray-800/50 dark:border-indigo-700">
+              <h6 class="text-lg font-semibold text-indigo-900 dark:text-indigo-100 mb-3">
+                📋 Configurar Columnas para Exportación Excel
+              </h6>
+              <p class="text-sm text-indigo-700 dark:text-indigo-300 mb-4">
+                Selecciona las columnas adicionales del catálogo que quieres incluir en el archivo Excel de resultados.
+                Las columnas "Genérico" y "Nombre" siempre se incluyen automáticamente.
+              </p>
+              
+              <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                @for (column of catalogoColumns(); track column) {
+                  <label class="flex items-center space-x-2 p-2 rounded-md hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer transition-colors">
+                    <input 
+                      type="checkbox"
+                      class="w-4 h-4 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500 dark:focus:ring-indigo-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                      [checked]="isExportColumnSelected(column)"
+                      (change)="toggleExportColumn(column)" />
+                    <span class="text-sm font-medium text-indigo-800 dark:text-indigo-200 flex-1">
+                      {{ column }}
+                    </span>
+                  </label>
+                }
+              </div>
+              
+              @if (selectedExportColumns().length > 0) {
+                <div class="mt-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg dark:bg-indigo-900/20 dark:border-indigo-700">
+                  <p class="text-sm text-indigo-700 dark:text-indigo-300">
+                    <span class="font-semibold">Columnas seleccionadas ({{ selectedExportColumns().length }}):</span>
+                    {{ selectedExportColumns().join(', ') }}
+                  </p>
+                </div>
+              }
+            </div>
+          }
+
           <!-- Botones de acción -->
           <div class="flex flex-wrap gap-3">
             <button 
@@ -239,8 +285,14 @@
               <button 
                 type="button"
                 class="px-6 py-2 bg-green-600 hover:bg-green-700 focus:ring-4 focus:ring-green-300 font-medium rounded-lg text-sm text-white focus:outline-none dark:bg-green-600 dark:hover:bg-green-700 dark:focus:ring-green-800"
-                (click)="exportResults()">
-                📥 Exportar Resultados
+                (click)="exportResults()"
+                [title]="'Exportar Excel con ' + (selectedExportColumns().length + 2) + ' columnas: Genérico, Nombre' + (selectedExportColumns().length > 0 ? ', ' + selectedExportColumns().join(', ') : '')">
+                📥 Exportar Excel Detallado
+                @if (selectedExportColumns().length > 0) {
+                  <span class="ml-1 px-2 py-0.5 bg-green-500 rounded-full text-xs">
+                    +{{ selectedExportColumns().length }}
+                  </span>
+                }
               </button>
               
               <button 
@@ -278,19 +330,54 @@
             en la columna "<strong>{{ selectedLineasColumn() }}</strong>" de las líneas de pedido:
           </p>
           
+          @if (selectedExportColumns().length > 0) {
+            <div class="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg dark:bg-blue-900/20 dark:border-blue-800">
+              <p class="text-sm text-blue-700 dark:text-blue-300">
+                <span class="font-semibold">Vista previa del Excel:</span> 
+                Los datos adicionales de las columnas seleccionadas ({{ selectedExportColumns().join(', ') }}) 
+                se muestran en la misma línea separados por guiones.
+              </p>
+            </div>
+          }
+          
           <div class="max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-red-300 dark:border-red-700 rounded p-4">
             <div class="space-y-2">
               @for (item of comparisonResults(); track item.campo) {
+                @let catalogoRow = getCatalogoDataForField(item.campo);
                 <div class="bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 px-4 py-3 rounded-lg text-sm border border-red-200 dark:border-red-700 shadow-sm">
-                  <div class="flex items-start space-x-3">
+                  <div class="break-words">
                     <span class="font-semibold text-red-900 dark:text-red-100">{{ item.campo }}</span>
-                    <span class="text-red-600 dark:text-red-300">-</span>
-                    <span class="text-red-700 dark:text-red-200 flex-1">{{ item.nombre }}</span>
+                    <span class="text-red-600 dark:text-red-300 mx-2">-</span>
+                    <span class="text-red-700 dark:text-red-200">{{ item.nombre }}</span>
+                    
+                    @if (selectedExportColumns().length > 0 && catalogoRow) {
+                      @for (column of selectedExportColumns(); track column) {
+                        <span class="text-red-600 dark:text-red-300 mx-2">-</span>
+                        <span class="text-red-700 dark:text-red-200">{{ catalogoRow[column] || 'N/A' }}</span>
+                      }
+                    }
                   </div>
                 </div>
               }
             </div>
           </div>
+          
+          @if (selectedExportColumns().length > 0) {
+            <div class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg dark:bg-blue-900/20 dark:border-blue-800">
+              <div class="flex items-start space-x-2">
+                <span class="text-blue-600 dark:text-blue-400 text-lg">💡</span>
+                <div>
+                  <p class="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-1">
+                    Información adicional en el Excel:
+                  </p>
+                  <p class="text-sm text-blue-700 dark:text-blue-300">
+                    El archivo Excel incluirá {{ selectedExportColumns().length }} columna(s) adicional(es): 
+                    <span class="font-medium">{{ selectedExportColumns().join(', ') }}</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          }
         </div>
       </section>
     }
